@@ -1,0 +1,16 @@
+{
+  "sandbox_type": "subprocess",
+  "timeout": 30,
+  "max_output": 50000,
+  "network_enabled": false,
+  "memory_limit": "256m",
+  "cpu_limit": 1.0,
+  "allowed_paths": [
+    ".",
+    "/tmp",
+    "/workspace"
+  ],
+  "env_vars": {
+    "PYTHONUNBUFFERED": "1"
+  }
+}

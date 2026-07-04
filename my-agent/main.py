@@ -57,9 +57,52 @@ def main():
         if not user_input or user_input.lower() in ("exit", "quit"):
             break
 
-        print("\nAgent: ", end="")
-        result = agent.run(user_input)
-        print(result)
+        # 进度状态
+        last_status = ""
+        
+        def progress_callback(status: str, progress: float):
+            """更新进度状态"""
+            nonlocal last_status
+            if status != last_status:
+                # 清除上一行状态
+                if last_status:
+                    print("\r" + " " * 60 + "\r", end="", flush=True)
+                
+                # 显示新状态
+                if status == "done":
+                    print("\r[完成]", end="", flush=True)
+                elif status == "thinking":
+                    print("\r[思考中...]", end="", flush=True)
+                elif status.startswith("calling tool:"):
+                    tool_name = status.split(": ")[1]
+                    print(f"\r[调用工具: {tool_name}]", end="", flush=True)
+                else:
+                    print(f"\r[{status}]", end="", flush=True)
+                
+                last_status = status
+
+        print("\nAgent: ", end="", flush=True)
+        
+        # 使用流式输出
+        try:
+            for chunk in agent.run_stream(
+                user_input, 
+                progress_callback=progress_callback
+            ):
+                # 清除进度状态行
+                if last_status:
+                    print("\r" + " " * 60 + "\r", end="", flush=True)
+                    last_status = ""
+                
+                print(chunk, end="", flush=True)
+        except KeyboardInterrupt:
+            print("\n[中断]")
+        
+        # 清除进度状态
+        if last_status:
+            print("\r" + " " * 60 + "\r", end="", flush=True)
+        
+        print()  # 换行
 
 
 if __name__ == "__main__":

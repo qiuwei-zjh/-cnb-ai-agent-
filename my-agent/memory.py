@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import math
 import os
+from openai import OpenAI
 
 from llm import LLMClient
 
@@ -19,14 +20,31 @@ class Memory:
         self._entries: list[tuple[str, list[float]]] = []
         self._llm = llm
         self._embedding_available = True  # 标记 embedding API 是否可用
+        self._embedding_client = None  # 独立的 embedding API 客户端
 
     def _get_embedding(self, text: str) -> list[float] | None:
         """获取文本的向量表示。embedding API 不可用时返回 None。"""
         if not self._embedding_available:
             return None
         try:
-            resp = self._llm.client.embeddings.create(
-                model=os.getenv("EMBEDDING_MODEL", "hunyuan-embedding"),
+            # 支持独立的 embedding API 配置
+            embedding_base_url = os.getenv("EMBEDDING_BASE_URL")
+            embedding_api_key = os.getenv("EMBEDDING_API_KEY")
+
+            if embedding_base_url and embedding_api_key:
+                # 使用独立的 embedding 客户端（懒加载）
+                if self._embedding_client is None:
+                    self._embedding_client = OpenAI(
+                        base_url=embedding_base_url,
+                        api_key=embedding_api_key,
+                    )
+                client = self._embedding_client
+            else:
+                # 使用主 LLM 客户端
+                client = self._llm.client
+
+            resp = client.embeddings.create(
+                model=os.getenv("EMBEDDING_MODEL", "text-embedding-3-small"),
                 input=text,
             )
             return resp.data[0].embedding
