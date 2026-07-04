@@ -181,17 +181,7 @@ class WebUI:
     
     def create_ui(self) -> gr.Blocks:
         """创建 Gradio 界面"""
-        with gr.Blocks(
-            title="My Coding Agent",
-            theme=gr.themes.Soft(),
-            css="""
-            .file-tree {
-                font-family: monospace;
-                font-size: 14px;
-                line-height: 1.5;
-            }
-            """
-        ) as app:
+        with gr.Blocks(title="My Coding Agent") as app:
             gr.Markdown("# 🤖 My Coding Agent")
             gr.Markdown("AI 驱动的编程助手，支持文件浏览和代码编辑")
             
@@ -238,7 +228,6 @@ class WebUI:
                     chatbot = gr.Chatbot(
                         label="对话历史",
                         height=400,
-                        show_copy_button=True
                     )
                     
                     # 输入框
@@ -333,7 +322,14 @@ def main():
         server_name=args.host,
         server_port=args.port,
         share=args.share,
-        show_error=True
+        show_error=True,
+        css="""
+        .file-tree {
+            font-family: monospace;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        """
     )
 
 
