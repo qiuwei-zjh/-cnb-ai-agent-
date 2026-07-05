@@ -1,8 +1,9 @@
-"""bash 工具 — 支持沙箱隔离执行。"""
+"""bash 工具 — 执行 shell 命令。"""
 
 import re
 import platform
-from sandbox import SandboxConfig, SandboxType, get_sandbox
+import subprocess
+import os
 
 # Linux/macOS 危险命令模式
 DANGER_PATTERNS_UNIX = [
@@ -33,38 +34,45 @@ DANGER_PATTERNS_WINDOWS = [
 
 def bash(command: str, workdir: str = ".", timeout: int = 30, max_output: int = 50000,
          sandbox_type: str = "subprocess") -> str:
-    """在工作目录下执行 shell 命令，带安全闸门和沙箱隔离。
+    """在工作目录下执行 shell 命令，带安全闸门。
 
     Args:
         command: 要执行的命令
         workdir: 工作目录
         timeout: 超时秒数
         max_output: 最大输出字符数
-        sandbox_type: 沙箱类型 (subprocess/docker/filesystem)
+        sandbox_type: 已废弃，保留兼容性
     """
     # 根据操作系统选择危险命令模式
     is_windows = platform.system() == "Windows"
     danger_patterns = DANGER_PATTERNS_WINDOWS if is_windows else DANGER_PATTERNS_UNIX
-    
+
     # 危险命令拦截
     for pattern in danger_patterns:
         if re.search(pattern, command, re.IGNORECASE):
             return f"❌ 拒绝执行危险命令: {command}"
 
-    # 配置沙箱
-    sandbox_type_enum = SandboxType(sandbox_type)
-    config = SandboxConfig(
-        sandbox_type=sandbox_type_enum,
-        timeout=timeout,
-        network_enabled=False,  # 默认禁用网络
-    )
-    
-    # 创建沙箱并执行
-    sandbox = get_sandbox(config)
-    result = sandbox.execute(command, workdir, timeout)
-    
-    output = result["output"]
-    
+    # 解析工作目录
+    cwd = os.path.abspath(workdir) if workdir != "." else None
+
+    try:
+        result = subprocess.run(
+            command,
+            shell=True,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=os.environ.copy(),
+        )
+        output = result.stdout
+        if result.stderr:
+            output += result.stderr
+    except subprocess.TimeoutExpired:
+        return f"❌ 命令超时 ({timeout}s)"
+    except Exception as e:
+        return f"❌ 执行失败: {str(e)}"
+
     if len(output) > max_output:
         output = output[:max_output] + f"\n... (截断，共 {len(output)} 字符)"
 
