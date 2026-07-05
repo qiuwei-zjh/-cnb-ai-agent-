@@ -47,4 +47,9 @@ python -m pytest tests/ -v
 ```
 
 每章只需要让当前章节的测试通过即可。
-新增了：流式传输，沙箱隔离，webUI
+
+## 新增:
+流式传输，沙箱隔离，webUI
+
+详见
+my-agent-v2
