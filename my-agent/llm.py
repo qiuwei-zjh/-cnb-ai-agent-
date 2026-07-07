@@ -119,8 +119,8 @@ class LLMClient:
                         if tc.function.arguments:
                             tool_calls_data[tc.index]["function"]["arguments"] += tc.function.arguments
             
-            # 如果流结束，返回完整的工具调用信息
-            if choice.finish_reason == "stop":
+            # 如果流结束（stop / tool_calls / length / content_filter），返回完整结果
+            if choice.finish_reason is not None:
                 # 返回最终结果
                 result = {"role": "assistant", "content": content}
                 if tool_calls_data:

@@ -221,13 +221,23 @@ class Agent:
             # 执行工具调用
             for tool_call in tool_calls:
                 tool_name = tool_call["function"]["name"]
+                tool_args = tool_call["function"]["arguments"]
                 # 报告进度：正在调用工具
                 if progress_callback:
                     progress_callback(f"calling tool: {tool_name}", (i + 0.5) / max_iterations)
-                
+
+                # 向用户展示正在调用的工具
+                yield f"\n\n🔧 **调用工具**: `{tool_name}`\n```json\n{tool_args}\n```\n"
+
                 # 执行工具
                 result = self._execute_tool(tool_call)
-                
+
+                # 向用户展示工具执行结果（截断过长内容）
+                result_str = str(result["content"])
+                if len(result_str) > 2000:
+                    result_str = result_str[:2000] + "\n... (结果过长，已截断)"
+                yield f"\n📋 **执行结果**:\n```\n{result_str}\n```\n"
+
                 # 添加工具结果到对话历史
                 messages.append({
                     "role": "tool",

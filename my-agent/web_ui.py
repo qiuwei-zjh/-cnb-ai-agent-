@@ -8,9 +8,7 @@ Web UI 模块
 
 import os
 import sys
-import json
-from pathlib import Path
-from typing import List, Tuple, Optional
+import random
 import gradio as gr
 
 # 添加当前目录到路径
@@ -62,7 +60,7 @@ class WebUI:
         if root_dir is None:
             root_dir = self.workspace_dir
         
-        def build_tree(path: str, prefix: str = "", depth: int = 0) -> List[str]:
+        def build_tree(path: str, prefix: str = "", depth: int = 0) -> list[str]:
             if depth >= max_depth:
                 return []
             
@@ -160,25 +158,40 @@ class WebUI:
         except Exception as e:
             return f"读取文件失败: {str(e)}"
     
-    def chat_with_agent(self, message: str, history: List[Tuple[str, str]]) -> Tuple[str, List[Tuple[str, str]]]:
-        """与 Agent 对话"""
-        # 添加用户消息到历史
-        history.append((message, ""))
-        
+    def chat_with_agent(self, message: str, history: list):
+        """与 Agent 对话（Gradio 生成器模式）
+
+        Gradio 6.x 使用 dict 格式的消息列表：
+        [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
+        """
+        if not message or not message.strip():
+            yield "", history
+            return
+
+        # 添加用户消息和助手消息占位
+        history.append({"role": "user", "content": message})
+        history.append({"role": "assistant", "content": ""})
+
         try:
-            # 运行 Agent
+            # 运行 Agent，流式输出
             response = ""
             for chunk in self.agent.run_stream(message):
                 response += chunk
-                # 更新最后一轮的回复
-                history[-1] = (message, response)
+                # 实时更新最后一轮（助手消息）的回复
+                history[-1] = {"role": "assistant", "content": response}
                 yield "", history
         except Exception as e:
-            response = f"错误: {str(e)}"
-            history[-1] = (message, response)
-        
-        return "", history
+            error_msg = f"\n\n❌ **运行错误**: {str(e)}"
+            response += error_msg
+            history[-1] = {"role": "assistant", "content": response}
+            yield "", history
     
+    def reset_agent(self) -> str:
+        """重置 Agent 状态（清空对话上下文）。"""
+        self.agent = self._init_agent()
+        self.chat_history = []
+        return "🔄 Agent 已重置，对话上下文已清空。"
+
     def create_ui(self) -> gr.Blocks:
         """创建 Gradio 界面"""
         with gr.Blocks(title="My Coding Agent") as app:
@@ -260,23 +273,33 @@ class WebUI:
                 outputs=file_content
             )
             
-            # 发送消息
-            send_btn.click(
+            # 发送消息（并在完成后刷新文件树）
+            send_event = send_btn.click(
                 fn=self.chat_with_agent,
                 inputs=[msg_input, chatbot],
                 outputs=[msg_input, chatbot]
+            ).then(
+                fn=lambda: self.get_file_tree(),
+                outputs=file_tree
             )
-            
-            # 回车发送
-            msg_input.submit(
+
+            # 回车发送（并在完成后刷新文件树）
+            enter_event = msg_input.submit(
                 fn=self.chat_with_agent,
                 inputs=[msg_input, chatbot],
                 outputs=[msg_input, chatbot]
+            ).then(
+                fn=lambda: self.get_file_tree(),
+                outputs=file_tree
             )
             
-            # 清空对话
+            # 清空对话并重置 Agent
+            def clear_and_reset():
+                self.reset_agent()
+                return []
+
             clear_btn.click(
-                fn=lambda: ([], []),
+                fn=clear_and_reset,
                 outputs=chatbot
             )
             
@@ -289,7 +312,6 @@ class WebUI:
             ]
             
             def get_example():
-                import random
                 return random.choice(example_tasks)
             
             example_btn.click(
