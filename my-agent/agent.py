@@ -24,12 +24,15 @@ class Agent:
         system_prompt: str = "你是一个有用的助手。",
         context_manager=None,
         memory=None,
+        conversation: list[dict] | None = None,
     ):
         self.llm = llm
         self.tools = tools
         self.system_prompt = system_prompt
         self.context_manager = context_manager
         self.memory = memory
+        # 跨轮次对话历史（不含 system prompt 和记忆注入等临时消息）
+        self.conversation: list[dict] = conversation or []
 
     def _execute_tool(self, tool_call: dict) -> dict:
         """执行单个工具调用，返回 {"id": ..., "content": ...} 格式的结果。"""
@@ -44,12 +47,12 @@ class Agent:
         return {"id": tool_call["id"], "content": str(result)}
 
     def run(self, user_message: str, max_iterations: int = 10) -> str:
+        # 构建消息列表：system(临时) + memory(临时) + conversation + user
         messages = [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": user_message},
+            {"role": "system", "content": self.system_prompt, "_ephemeral": True},
         ]
 
-       
+        # 记忆注入（标记为临时消息，不会被持久化）
         if self.memory:
             try:
                 memories = self.memory.search(user_message, k=3)
@@ -58,20 +61,28 @@ class Agent:
                     memory_text = "【相关历史记忆】\n" + "\n".join(
                         f"- {text}" for _, text in relevant
                     )
-                    messages.insert(1, {"role": "system", "content": memory_text})
+                    messages.append(
+                        {"role": "system", "content": memory_text, "_ephemeral": True}
+                    )
             except Exception:
-                pass 
+                pass
+
+        # 恢复历史对话
+        messages.extend(self.conversation)
+
+        # 添加当前用户消息
+        messages.append({"role": "user", "content": user_message})
 
         tool_schemas = self.tools.to_schemas()
 
         for i in range(max_iterations):
-           
+
             if self.context_manager:
                 try:
                     if self.context_manager.should_compress(messages):
                         messages = self.context_manager.compress(messages)
                 except Exception:
-                    pass  
+                    pass
 
             if tool_schemas:
                 response = self.llm.chat_with_tools(
@@ -84,7 +95,6 @@ class Agent:
 
             tool_calls = response.get("tool_calls")
 
-          
             assistant_msg: dict = {"role": response["role"]}
             if response.get("content"):
                 assistant_msg["content"] = response["content"]
@@ -96,10 +106,20 @@ class Agent:
                 # 任务完成，将本轮对话存入记忆
                 if self.memory and response.get("content"):
                     try:
-                        self.memory.add(f"用户: {user_message}\nAgent: {response['content']}")
+                        self.memory.add(
+                            f"用户: {user_message}\nAgent: {response['content']}"
+                        )
                     except Exception:
                         pass  # 记忆存储失败不影响主流程
+
+                # 更新 conversation：过滤掉临时消息（system prompt、记忆注入）
+                self.conversation = [
+                    {k: v for k, v in m.items() if k != "_ephemeral"}
+                    for m in messages
+                    if not m.get("_ephemeral")
+                ]
                 return response.get("content", "")
+
             # 执行工具调用（单个直接执行，多个并发）
             if len(tool_calls) == 1:
                 results = [self._execute_tool(tool_calls[0])]
@@ -116,33 +136,38 @@ class Agent:
                 })
 
         # 达到最大迭代次数
+        self.conversation = [
+            {k: v for k, v in m.items() if k != "_ephemeral"}
+            for m in messages
+            if not m.get("_ephemeral")
+        ]
         return f"[agent] 已达到最大迭代次数 ({max_iterations})，停止执行。"
 
     def run_stream(
-        self, 
-        user_message: str, 
+        self,
+        user_message: str,
         max_iterations: int = 10,
         progress_callback: Optional[Callable[[str, float], None]] = None
     ) -> Generator[str, None, None]:
         """
         流式运行 Agent，支持进度回调。
-        
+
         Args:
             user_message: 用户消息
             max_iterations: 最大迭代次数
             progress_callback: 进度回调函数，参数为 (status, progress)
                 status: 状态描述，如 "thinking", "calling tool: read_file", "done"
                 progress: 进度值 0.0-1.0
-        
+
         Yields:
             流式输出的文本片段
         """
+        # 构建消息列表：system(临时) + memory(临时) + conversation + user
         messages = [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": user_message},
+            {"role": "system", "content": self.system_prompt, "_ephemeral": True},
         ]
 
-        # 添加记忆
+        # 记忆注入（标记为临时消息）
         if self.memory:
             try:
                 memories = self.memory.search(user_message, k=3)
@@ -151,9 +176,17 @@ class Agent:
                     memory_text = "【相关历史记忆】\n" + "\n".join(
                         f"- {text}" for _, text in relevant
                     )
-                    messages.insert(1, {"role": "system", "content": memory_text})
+                    messages.append(
+                        {"role": "system", "content": memory_text, "_ephemeral": True}
+                    )
             except Exception:
-                pass 
+                pass
+
+        # 恢复历史对话
+        messages.extend(self.conversation)
+
+        # 添加当前用户消息
+        messages.append({"role": "user", "content": user_message}) 
 
         tool_schemas = self.tools.to_schemas()
 
@@ -209,13 +242,22 @@ class Agent:
                 # 任务完成
                 if progress_callback:
                     progress_callback("done", 1.0)
-                
+
                 # 将本轮对话存入记忆
                 if self.memory and full_response.get("content"):
                     try:
-                        self.memory.add(f"用户: {user_message}\nAgent: {full_response['content']}")
+                        self.memory.add(
+                            f"用户: {user_message}\nAgent: {full_response['content']}"
+                        )
                     except Exception:
                         pass
+
+                # 更新 conversation：过滤掉临时消息
+                self.conversation = [
+                    {k: v for k, v in m.items() if k != "_ephemeral"}
+                    for m in messages
+                    if not m.get("_ephemeral")
+                ]
                 return
 
             # 执行工具调用
@@ -248,5 +290,23 @@ class Agent:
         # 达到最大迭代次数
         if progress_callback:
             progress_callback("max iterations reached", 1.0)
+        # 更新 conversation
+        self.conversation = [
+            {k: v for k, v in m.items() if k != "_ephemeral"}
+            for m in messages
+            if not m.get("_ephemeral")
+        ]
         yield f"[agent] 已达到最大迭代次数 ({max_iterations})，停止执行。"
+
+    def get_conversation(self) -> list[dict]:
+        """导出对话历史（供 SessionManager 保存）。"""
+        return self.conversation
+
+    def set_conversation(self, conversation: list[dict]) -> None:
+        """恢复对话历史（供 SessionManager 加载）。"""
+        self.conversation = conversation
+
+    def clear_conversation(self) -> None:
+        """清空对话历史（重置会话）。"""
+        self.conversation = []
 

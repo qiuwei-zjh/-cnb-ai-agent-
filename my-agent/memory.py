@@ -104,6 +104,14 @@ class Memory:
         scored.sort(key=lambda x: x[0], reverse=True)
         return scored[:k]
 
+    def get_entries(self) -> list:
+        """导出所有记忆条目，供 SessionManager 持久化。"""
+        return self._entries
+
+    def load_entries(self, entries: list) -> None:
+        """批量加载记忆条目，供 SessionManager 恢复。"""
+        self._entries = entries
+
     def save(self, path: str) -> None:
         """持久化到 JSON 文件。"""
         with open(path, "w", encoding="utf-8") as f:
